@@ -1,0 +1,222 @@
+openapi: 3.0.0
+info:
+  title: CodeBuddy Agent Tools API
+  description: |
+    Amazon Bedrock Agent의 Action Group에 등록되는 Tool 명세입니다.
+    각 Tool은 Lambda 함수로 구현되어 있습니다.
+  version: 1.0.0
+
+paths:
+  /github/pr:
+    post:
+      operationId: get_github_pr
+      summary: GitHub PR 코드 가져오기
+      description: GitHub PR URL을 받아 변경된 코드 파일과 diff를 반환합니다. 이미지, PDF 등 바이너리 파일은 무시합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - pr_url
+              properties:
+                pr_url:
+                  type: string
+                  description: GitHub PR의 전체 URL (예: https://github.com/owner/repo/pull/123)
+      responses:
+        '200':
+          description: PR 코드 정보
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pr_title:
+                    type: string
+                  pr_author:
+                    type: string
+                  code_files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        filename:
+                          type: string
+                        patch:
+                          type: string
+                        additions:
+                          type: integer
+                        deletions:
+                          type: integer
+
+  /analyze/complexity:
+    post:
+      operationId: analyze_complexity
+      summary: 코드 복잡도 및 보안 취약점 분석
+      description: |
+        Python 코드의 순환 복잡도(Cyclomatic Complexity)를 계산하고
+        SQL Injection, 하드코딩된 비밀번호 등 보안 취약점을 탐지합니다.
+        OWASP Top 10 기반으로 분석합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+                - filename
+              properties:
+                code:
+                  type: string
+                  description: 분석할 소스 코드
+                filename:
+                  type: string
+                  description: 파일명 (확장자 포함, 예: app.py)
+      responses:
+        '200':
+          description: 분석 결과
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  complexity:
+                    type: object
+                    description: 함수별 복잡도 (함수명 -> {complexity, risk})
+                  style_issues:
+                    type: array
+                    items:
+                      type: string
+                  security_issues:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        line:
+                          type: integer
+                        type:
+                          type: string
+                        suggestion:
+                          type: string
+
+  /generate/test:
+    post:
+      operationId: generate_unit_test
+      summary: pytest 단위 테스트 자동 생성
+      description: Python 코드를 분석하여 각 함수에 대한 pytest 테스트 코드를 자동으로 생성합니다. 정상/비정상 케이스 및 Mock 테스트를 포함합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+                - filename
+              properties:
+                code:
+                  type: string
+                  description: 테스트를 생성할 소스 코드
+                filename:
+                  type: string
+                  description: 파일명
+      responses:
+        '200':
+          description: 생성된 테스트 코드
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  test_code:
+                    type: string
+                  functions_found:
+                    type: array
+                    items:
+                      type: string
+
+  /suggest/refactor:
+    post:
+      operationId: suggest_refactor
+      summary: 리팩토링 제안 생성
+      description: 코드에서 긴 함수, 중복 코드, 매직 넘버, 타입 힌트 누락 등을 탐지하고 구체적인 개선 방법을 제안합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+                - filename
+              properties:
+                code:
+                  type: string
+                filename:
+                  type: string
+      responses:
+        '200':
+          description: 리팩토링 제안 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  refactoring_suggestions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        category:
+                          type: string
+                          enum: ["함수 분리", "중복 제거", "매직 넘버", "타입 힌트"]
+                        severity:
+                          type: string
+                          enum: [high, medium, low]
+                        detail:
+                          type: string
+                        suggestion:
+                          type: string
+
+  /github/comment:
+    post:
+      operationId: post_pr_comment
+      summary: GitHub PR에 리뷰 댓글 등록
+      description: 분석 결과를 마크다운으로 포맷하여 GitHub PR에 댓글로 등록합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - owner
+                - repo
+                - pr_number
+              properties:
+                owner:
+                  type: string
+                  description: GitHub 저장소 소유자
+                repo:
+                  type: string
+                  description: GitHub 저장소 이름
+                pr_number:
+                  type: string
+                  description: PR 번호
+                analysis_result:
+                  type: string
+                  description: JSON 형태의 분석 결과
+      responses:
+        '200':
+          description: 댓글 등록 결과
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  comment_url:
+                    type: string

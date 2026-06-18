@@ -1,0 +1,270 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "CodeBuddy - AI GitHub PR 자동 리뷰 시스템 (Amazon Bedrock Agent)"
+
+Parameters:
+  AgentIdParam:
+    Type: String
+  AliasIdParam:
+    Type: String
+  GitHubTokenParam:
+    Type: String
+    NoEcho: true
+  GitHubSecretParam:
+    Type: String
+    NoEcho: true
+    Default: "codebuddy-secret"
+  ToolsCodeS3Bucket:
+    Type: String
+    Description: "lambda/tools/*.py 와 requests Layer zip이 업로드된 S3 버킷"
+  ToolsCodeS3Key:
+    Type: String
+    Default: "codebuddy-tools.zip"
+    Description: "lambda/tools/ 폴더 내 .py 파일들을 zip 루트에 압축한 키 (get_github_pr.handler 형태로 참조)"
+  RequestsLayerS3Key:
+    Type: String
+    Default: "requests-layer.zip"
+    Description: "requests 패키지를 python/ 폴더 아래 담은 Lambda Layer zip 키"
+
+Resources:
+  # ─── IAM Role ────────────────────────────────────────────────────────
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: codebuddy-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: BedrockAgentPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [bedrock:InvokeAgent, bedrock:InvokeModel, logs:*, cloudwatch:PutMetricData]
+                Resource: "*"
+
+  # ─── Orchestrator Lambda ────────────────────────────────────────────
+  OrchestratorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: codebuddy-orchestrator
+      Runtime: python3.12
+      Handler: orchestrator.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 1024
+      Environment:
+        Variables:
+          AGENT_ID: !Ref AgentIdParam
+          ALIAS_ID: !Ref AliasIdParam
+          GITHUB_TOKEN: !Ref GitHubTokenParam
+          GITHUB_SECRET: !Ref GitHubSecretParam
+      Code:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref ToolsCodeS3Key
+
+  # ─── Requests Layer (github_pr / post_pr_comment에서 사용) ───────────
+  RequestsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: codebuddy-requests-layer
+      CompatibleRuntimes: [python3.12]
+      Content:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref RequestsLayerS3Key
+
+  # ─── Tool Lambdas (Bedrock Agent Action Group) ───────────────────────
+  GetGithubPrLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: codebuddy-get-github-pr
+      Runtime: python3.12
+      Handler: github_pr.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Layers: [!Ref RequestsLayer]
+      Environment:
+        Variables:
+          GITHUB_TOKEN: !Ref GitHubTokenParam
+      Code:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref ToolsCodeS3Key
+
+  AnalyzeComplexityLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: codebuddy-analyze-complexity
+      Runtime: python3.12
+      Handler: complexity.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref ToolsCodeS3Key
+
+  GenerateUnitTestLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: codebuddy-generate-unit-test
+      Runtime: python3.12
+      Handler: testgen.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref ToolsCodeS3Key
+
+  SuggestRefactorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: codebuddy-suggest-refactor
+      Runtime: python3.12
+      Handler: refactor.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref ToolsCodeS3Key
+
+  PostPrCommentLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: codebuddy-post-pr-comment
+      Runtime: python3.12
+      Handler: post_pr_comment.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Layers: [!Ref RequestsLayer]
+      Environment:
+        Variables:
+          GITHUB_TOKEN: !Ref GitHubTokenParam
+      Code:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref ToolsCodeS3Key
+
+  # ─── Bedrock Agent가 Tool Lambda를 호출할 수 있도록 허용 ──────────────
+  GetGithubPrBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetGithubPrLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentIdParam}"
+
+  AnalyzeComplexityBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt AnalyzeComplexityLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentIdParam}"
+
+  GenerateUnitTestBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GenerateUnitTestLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentIdParam}"
+
+  SuggestRefactorBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SuggestRefactorLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentIdParam}"
+
+  PostPrCommentBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt PostPrCommentLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentIdParam}"
+
+  # ─── API Gateway ────────────────────────────────────────────────────
+  CodeBuddyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: CodeBuddyAPI
+
+  ReviewResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref CodeBuddyApi
+      ParentId: !GetAtt CodeBuddyApi.RootResourceId
+      PathPart: review
+
+  ReviewMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref CodeBuddyApi
+      ResourceId: !Ref ReviewResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: false
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrchestratorLambda.Arn}/invocations"
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ReviewMethod
+    Properties:
+      RestApiId: !Ref CodeBuddyApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref CodeBuddyApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: CodeBuddyApiKey
+      Enabled: true
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: CodeBuddyUsagePlan
+      ApiStages:
+        - ApiId: !Ref CodeBuddyApi
+          Stage: !Ref ApiStage
+      Throttle:
+        BurstLimit: 10
+        RateLimit: 5
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt OrchestratorLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${CodeBuddyApi}/*/POST/review"
+
+Outputs:
+  ApiGatewayUrl:
+    Value: !Sub "https://${CodeBuddyApi}.execute-api.${AWS::Region}.amazonaws.com/prod/review"
