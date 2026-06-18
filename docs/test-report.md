@@ -73,10 +73,12 @@ pytest tests/test_e2e.py -v
 | 바이너리 파일(이미지/PDF) 무시 | 부분 커버 | `github_pr.py`의 확장자 필터링 로직은 있으나 전용 단위 테스트 없음 |
 | 동시 PR 처리 | **미커버** | Lambda는 기본적으로 동시 실행을 지원하지만 별도 동시성 테스트는 없음 |
 | `suggest_refactor` 단위 테스트 | **미커버** | `refactor.py`에 대한 전용 테스트 없음(현재는 `complexity.py`, `testgen.py`만 단위 테스트 존재) |
+| `send_slack_message` 단위 테스트 | **미커버** | `send_slack.py`에 대한 전용 테스트 없음. Slack Webhook 실패(잘못된 URL 등) 시 에러 처리 경로 미검증 |
 | 평균 응답 시간 / 성공률 측정 | **미커버** | CloudWatch 커스텀 메트릭(`put_metric_data`) 미구현 |
 
 ## 다음에 추가하면 좋은 테스트
 
 - `refactor.py`의 `find_long_functions`, `find_duplicate_code`, `find_magic_numbers`, `suggest_type_hints`에 대한 단위 테스트
 - `github_pr.py`의 바이너리 파일 필터링, 빈 PR 처리에 대한 단위 테스트
+- `send_slack.py`의 Webhook 호출 성공/실패 케이스에 대한 Mock 기반 단위 테스트
 - 배포 후 CloudWatch Logs Insights 또는 `put_metric_data`로 평균 리뷰 시간 측정

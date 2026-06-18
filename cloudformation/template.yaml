@@ -24,6 +24,10 @@ Parameters:
     Type: String
     Default: "requests-layer.zip"
     Description: "requests 패키지를 python/ 폴더 아래 담은 Lambda Layer zip 키"
+  SlackWebhookUrlParam:
+    Type: String
+    NoEcho: true
+    Description: "Slack Incoming Webhook URL (send_slack_message Tool에서 사용)"
 
 Resources:
   # ─── IAM Role ────────────────────────────────────────────────────────
@@ -153,6 +157,23 @@ Resources:
         S3Bucket: !Ref ToolsCodeS3Bucket
         S3Key: !Ref ToolsCodeS3Key
 
+  SendSlackMessageLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: codebuddy-send-slack-message
+      Runtime: python3.12
+      Handler: send_slack.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Layers: [!Ref RequestsLayer]
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrlParam
+      Code:
+        S3Bucket: !Ref ToolsCodeS3Bucket
+        S3Key: !Ref ToolsCodeS3Key
+
   # ─── Bedrock Agent가 Tool Lambda를 호출할 수 있도록 허용 ──────────────
   GetGithubPrBedrockPermission:
     Type: AWS::Lambda::Permission
@@ -190,6 +211,14 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !GetAtt PostPrCommentLambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentIdParam}"
+
+  SendSlackMessageBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt SendSlackMessageLambda.Arn
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
       SourceArn: !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentIdParam}"

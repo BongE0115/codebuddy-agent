@@ -6,6 +6,7 @@
 
 - 하루 100건의 PR 리뷰 요청 (영업일 22일/월 기준)
 - PR 1건당 Bedrock Agent가 5개 Tool(get_github_pr → analyze_complexity → generate_unit_test → suggest_refactor → post_pr_comment)을 순차 호출
+- send_slack_message는 사용자가 명시적으로 요청할 때만 호출되므로 정기 비용 산정에서는 제외(호출당 Lambda 비용은 다른 Tool과 동일하게 미미함)
 - Tool Lambda는 모두 로컬 AST/정규식 기반 정적 분석이라 Bedrock을 추가로 호출하지 않음(Bedrock 호출은 Agent의 추론 단계 1회에 집중)
 
 ## 비용 구성 요소
@@ -13,7 +14,7 @@
 | 서비스 | 단가 | 산정 기준 | 일 100건 | 월 (22일) |
 |---|---|---|---|---|
 | Orchestrator Lambda (1024MB) | $0.0000166667/GB-초 | 평균 20초 실행(Agent 응답 대기 포함) | ~$0.03 | ~$0.73 |
-| Tool Lambda 5종 (256MB) | $0.0000166667/GB-초 | PR당 5회 호출, 평균 1~2초 | ~$0.01 | ~$0.20 |
+| Tool Lambda 6종 (256MB) | $0.0000166667/GB-초 | PR당 5회 호출(+ 요청 시 Slack 1회), 평균 1~2초 | ~$0.01 | ~$0.20 |
 | API Gateway (REST, Lambda 프록시) | $1.00 / 백만 호출 | 100건/일 | <$0.01 | <$0.01 |
 | Bedrock Agent (Claude Sonnet 4.6) | 입력 $0.003/1K, 출력 $0.015/1K 토큰 | PR당 추론+5단계 Tool 호출 | ~$0.20 | ~$4.40 |
 | CloudWatch Logs | $0.50/GB | Lambda 로그 적재 | ~$0.05 | ~$1.10 |

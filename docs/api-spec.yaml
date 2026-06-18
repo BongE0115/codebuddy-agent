@@ -220,3 +220,36 @@ paths:
                     type: boolean
                   comment_url:
                     type: string
+
+  /slack/notify:
+    post:
+      operationId: send_slack_message
+      summary: Slack 채널에 알림 전송
+      description: Slack Incoming Webhook으로 지정한 채널에 메시지를 전송합니다. 사용자가 명시적으로 요청했을 때만 호출합니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                channel:
+                  type: string
+                  description: "Slack 채널명 (예: '#code-review') 또는 사용자 ID"
+                message:
+                  type: string
+                  description: 전송할 메시지 본문
+      responses:
+        '200':
+          description: 전송 결과
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string

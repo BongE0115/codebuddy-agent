@@ -14,17 +14,17 @@ Orchestrator Lambda (codebuddy-orchestrator)
   - PR URL 파싱 → sessionId 생성
   - Bedrock Agent invoke_agent() 호출
         ↓
-Bedrock Agent (Action Group: 5개 Tool, OpenAPI 스키마 docs/api-spec.yaml)
+Bedrock Agent (Action Group: 6개 Tool, OpenAPI 스키마 docs/api-spec.yaml)
   ┌───────────────┬──────────────────────┬─────────────────────┐
   │ get_github_pr │ analyze_complexity   │ generate_unit_test   │
   ├───────────────┼──────────────────────┼─────────────────────┤
-  │ suggest_refactor │ post_pr_comment   │                      │
+  │ suggest_refactor │ post_pr_comment   │ send_slack_message   │
   └───────────────┴──────────────────────┴─────────────────────┘
         ↓
-GitHub PR에 분석 결과 댓글 등록
+GitHub PR에 분석 결과 댓글 등록 (+ 요청 시 Slack 알림)
 ```
 
-Agent는 한 번의 PR 리뷰 요청에 대해 위 5개 Tool을 순서대로(get_github_pr → analyze_complexity → generate_unit_test/suggest_refactor → post_pr_comment) 호출하도록 Instructions에 구성되어 있습니다. Slack 알림 Tool은 의도적으로 제외했습니다(아래 "범위" 참고).
+Agent는 한 번의 PR 리뷰 요청에 대해 get_github_pr → analyze_complexity → generate_unit_test/suggest_refactor → post_pr_comment 순서로 Tool을 호출하도록 Instructions에 구성되어 있습니다. send_slack_message는 사용자가 명시적으로 요청했을 때만 호출됩니다.
 
 ## 주요 기능
 
@@ -37,6 +37,7 @@ Agent는 한 번의 PR 리뷰 요청에 대해 위 5개 Tool을 순서대로(get
 | pytest 단위 테스트 자동 생성 | `ast`로 함수 추출 후 정상/예외/Mock 케이스 템플릿 생성 | [lambda/tools/testgen.py](lambda/tools/testgen.py) |
 | 리팩토링 제안 | 긴 함수, 중복 코드, 매직 넘버, 타입 힌트 누락 탐지 | [lambda/tools/refactor.py](lambda/tools/refactor.py) |
 | GitHub PR 댓글 등록 | 분석 결과를 Markdown으로 포맷해 PR(Issue) 댓글로 등록 | [lambda/tools/post_pr_comment.py](lambda/tools/post_pr_comment.py) |
+| Slack 알림 | Incoming Webhook으로 지정 채널에 메시지 전송 (사용자가 요청했을 때만) | [lambda/tools/send_slack.py](lambda/tools/send_slack.py) |
 
 > 참고: 코드 스타일/보안/복잡도 분석은 Bedrock Knowledge Base(RAG)가 아니라 Lambda 내부의 로컬 AST/정규식 규칙으로 구현되어 있습니다. LLM 호출은 Bedrock Agent의 추론(Orchestration) 단계에만 사용됩니다.
 
@@ -54,7 +55,8 @@ codebuddy-agent/
 │       ├── complexity.py
 │       ├── testgen.py
 │       ├── refactor.py
-│       └── post_pr_comment.py
+│       ├── post_pr_comment.py
+│       └── send_slack.py
 ├── docs/
 │   ├── api-spec.yaml         # Bedrock Agent Action Group OpenAPI 스키마
 │   ├── cost-analysis.md      # 월간 예상 비용 분석
@@ -69,6 +71,7 @@ codebuddy-agent/
 2. **Bedrock Agent + Alias** — AWS 콘솔(Amazon Bedrock → Agents)에서 미리 생성. Agent ID / Alias ID가 필요합니다.
 3. **GitHub Personal Access Token** — PR 조회/댓글 작성 권한
 4. **S3 버킷** — Lambda 코드(zip)와 Lambda Layer(zip)를 업로드할 버킷
+5. **Slack Incoming Webhook URL** — Slack 알림 Tool용 (Slack 알림을 쓰지 않을 경우 생략 가능, 단 send_slack_message 호출 시 실패 응답을 반환함)
 
 값을 구하는 구체적인 방법은 [환경 변수/파라미터 값 가져오는 방법](#환경-변수파라미터-값-가져오는-방법) 섹션을 참고하세요.
 
@@ -105,6 +108,7 @@ aws cloudformation deploy \
       GitHubTokenParam=<GITHUB_PAT> \
       GitHubSecretParam=<WEBHOOK_SECRET> \
       ToolsCodeS3Bucket=<YOUR_BUCKET> \
+      SlackWebhookUrlParam=<SLACK_INCOMING_WEBHOOK_URL> \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
@@ -120,7 +124,7 @@ aws cloudformation describe-stacks \
 
 ### 5. Bedrock Agent Action Group 연결
 
-`docs/api-spec.yaml`을 Action Group의 OpenAPI 스키마로 등록하고, 각 operationId(`get_github_pr`, `analyze_complexity`, `generate_unit_test`, `suggest_refactor`, `post_pr_comment`)를 3번에서 생성된 해당 Tool Lambda ARN에 연결한 뒤 `prepare_agent()`로 반영합니다.
+`docs/api-spec.yaml`을 Action Group의 OpenAPI 스키마로 등록하고, 각 operationId(`get_github_pr`, `analyze_complexity`, `generate_unit_test`, `suggest_refactor`, `post_pr_comment`, `send_slack_message`)를 3번에서 생성된 해당 Tool Lambda ARN에 연결한 뒤 `prepare_agent()`로 반영합니다.
 
 ### 6. GitHub Webhook 등록
 
@@ -152,6 +156,7 @@ curl -X POST <ApiGatewayUrl> \
 | `GitHubTokenParam` (`GITHUB_TOKEN`) | GitHub → Settings → Developer settings → Personal access tokens에서 직접 발급 (classic: `repo` scope / fine-grained: Contents Read + Pull requests Read & Write) |
 | `GitHubSecretParam` (`GITHUB_SECRET`) | 본인이 직접 정하는 임의의 문자열(랜덤 시크릿 권장). GitHub Webhook 설정의 Secret 필드에 **동일한 값**을 입력해야 서명 검증이 통과함 |
 | `ToolsCodeS3Bucket` / `ToolsCodeS3Key` | 본인이 만든 S3 버킷 이름과, 그 버킷에 업로드한 zip 파일의 키(파일명). AWS가 발급하는 값이 아니라 직접 지정 |
+| `SlackWebhookUrlParam` (`SLACK_WEBHOOK_URL`) | Slack에서 직접 발급. [api.slack.com/apps](https://api.slack.com/apps) → Create New App → Incoming Webhooks 활성화 → Add New Webhook to Workspace → 채널 선택 후 발급되는 URL |
 | `CODEBUDDY_API_URL` (테스트용) | AWS가 생성해주는 값. CloudFormation 배포 완료 후 `aws cloudformation describe-stacks --stack-name CodeBuddyStack --query "Stacks[0].Outputs"`로 조회되는 `ApiGatewayUrl` 출력값 |
 
 ## 테스트
