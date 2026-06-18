@@ -171,9 +171,3 @@ pytest tests/test_e2e.py -v
 ```
 
 테스트 범위와 결과는 [docs/test-report.md](docs/test-report.md), 예상 운영 비용은 [docs/cost-analysis.md](docs/cost-analysis.md)를 참고하세요.
-
-## 범위 / 알려진 제한
-
-- Slack 알림은 구현하지 않았습니다(선택 사항으로 판단하여 제외).
-- 코드 스타일/보안/복잡도 분석은 Bedrock Knowledge Base(RAG)가 아닌 로컬 규칙 기반(AST/정규식)입니다.
-- 1000줄을 초과하는 대용량 코드에 대한 함수 단위 청크 분할 분석은 아직 구현되어 있지 않습니다.
