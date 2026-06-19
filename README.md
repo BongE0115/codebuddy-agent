@@ -61,8 +61,10 @@ codebuddy-agent/
 │   ├── api-spec.yaml         # Bedrock Agent Action Group OpenAPI 스키마
 │   ├── cost-analysis.md      # 월간 예상 비용 분석
 │   └── test-report.md        # 테스트 범위 및 결과
-└── tests/
-    └── test_e2e.py           # 단위 테스트 + API E2E 테스트
+├── tests/
+│   └── test_e2e.py           # 단위 테스트 + API E2E 테스트
+└── demo/
+    └── demo.mp4              # 시연영상
 ```
 
 ## 사전 준비물
