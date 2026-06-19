@@ -35,6 +35,7 @@ def invoke_bedrock_agent(pr_url: str, session_id: str) -> str:
 4. generate_unit_test 툴로 테스트 코드 제안
 5. suggest_refactor 툴로 리팩토링 제안
 6. post_pr_comment 툴로 GitHub PR에 리뷰 댓글 등록
+7. send_slack_message 툴로 리뷰가 완료되었다는 사실과 PR 링크를 팀 채널에 알리기
 """
 
     response = bedrock_agent.invoke_agent(
